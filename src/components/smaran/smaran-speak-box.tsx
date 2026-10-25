@@ -4,8 +4,10 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { useStore } from "@/lib/store/store";
-import { parseSmaranCommand, healthLabel, type HealthDraft } from "@/lib/nlu";
-import { upsertMeasurement } from "@/lib/store/actions";
+import { healthLabel, type HealthDraft } from "@/lib/nlu";
+import { requestInterpretation } from "@/lib/interpret/client";
+import type { InterpretSession, Interpretation } from "@/lib/interpret/schema";
+import { setAppointmentStatus, updateAppointment, updateMember, upsertMeasurement } from "@/lib/store/actions";
 import { latestMeasurement, memberById, todayOf } from "@/lib/selectors";
 import { formatLong } from "@/lib/dates";
 import { promptsFor, speakCopy, type SpeakContext } from "@/lib/speak-prompts";
@@ -13,6 +15,15 @@ import { Button } from "@/components/ui/button";
 import { WisprFlowInput } from "./wispr-flow-input";
 
 export type { SpeakContext };
+
+function sessionOf(context: SpeakContext): InterpretSession {
+  if (context === "ask") return "ask";
+  if (context === "documents") return "document";
+  if (context === "appointments") return "appointment";
+  if (context === "family") return "family";
+  if (typeof context === "object") return "health_update";
+  return "general_reminder";
+}
 
 export function SmaranSpeakBox({
   context = "general",
@@ -30,45 +41,96 @@ export function SmaranSpeakBox({
   onCapture?: (text: string) => void;
 }) {
   const router = useRouter();
-  const { state, commit } = useStore();
-  const [pending, setPending] = useState<HealthDraft | null>(null);
+  const { state, update, commit } = useStore();
+  const [pendingHealth, setPendingHealth] = useState<HealthDraft | null>(null);
+  const [pendingFact, setPendingFact] = useState<Interpretation | null>(null);
+  const [pendingAppt, setPendingAppt] = useState<Interpretation | null>(null);
+  const [clarify, setClarify] = useState<string | null>(null);
   const [saved, setSaved] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const c = speakCopy(context);
   const examples = promptsFor(context);
 
-  const onSubmit = (text: string): string | void => {
+  const onSubmit = async (text: string): Promise<string | void> => {
     setSaved(null);
-    const cmd = parseSmaranCommand(text, state);
-    if (cmd.intent === "health" && cmd.health) {
-      const h = cmd.health;
-      if (!h.memberId) return "Which person should I update — Mummy or Papa?";
-      if (!h.kind) return "I couldn't tell if this is blood pressure, sugar, heart rate or weight.";
-      if (h.incomplete === "bp_systolic_only") return "Did you mean a complete blood pressure, like 128/82?";
-      if (!h.value) return "I heard the type, but not a value. Try “Papa ka sugar aaj 118 tha.”";
-      setPending(h);
-      return;
-    }
-    if (cmd.intent === "question" || context === "documents" || context === "ask") {
-      if (onQuestion) onQuestion(cmd.text);
-      else router.push(`/ask?q=${encodeURIComponent(cmd.text)}`);
-      return;
-    }
-    if (onCapture) {
-      onCapture(cmd.text);
-      return;
-    }
-    router.push(`/new?kind=${cmd.intent}&text=${encodeURIComponent(cmd.text)}`);
-  };
-
-  const save = () => {
-    if (!pending?.memberId || !pending.kind || !pending.value) return;
+    setClarify(null);
+    setPendingFact(null);
+    setPendingAppt(null);
     setBusy(true);
     try {
-      const who = memberById(state, pending.memberId);
-      commit((s) => upsertMeasurement(s, { familyMemberId: pending.memberId!, kind: pending.kind!, value: pending.value!, unit: pending.unit ?? "", source: "wispr" }));
+      const result = await requestInterpretation(text, state, sessionOf(context));
+      const intent = result.intent;
+
+      if (intent === "unknown") {
+        setClarify(result.clarificationQuestion || "I need a clearer request before I create anything.");
+        return;
+      }
+      if (intent === "health_measurement") {
+        if (result.clarificationQuestion || !result.memberId || !result.measurementKind || !result.measurementValue) {
+          setClarify(result.clarificationQuestion || "I need the person, type and value before saving a measurement.");
+          return;
+        }
+        setPendingHealth({
+          transcript: text,
+          memberId: result.memberId,
+          kind: result.measurementKind,
+          value: result.measurementValue,
+          unit: result.unit,
+        });
+        return;
+      }
+      if (intent === "family_fact" && result.familyFact && result.memberId) {
+        setPendingFact(result);
+        return;
+      }
+      if (intent === "ask_question" || intent === "document_question" || context === "documents" || context === "ask") {
+        if (onQuestion) onQuestion(text);
+        else router.push(`/ask?q=${encodeURIComponent(text)}`);
+        return;
+      }
+      if (intent === "appointment_complete" || intent === "appointment_cancel" || intent === "appointment_reschedule") {
+        if (result.missingFields.includes("matchedRecordId") || !result.matchedAppointmentIds?.length) {
+          setClarify(result.clarificationQuestion || "Which existing appointment? I will not create a new one.");
+          return;
+        }
+        setPendingAppt(result);
+        return;
+      }
+      if (onCapture) {
+        onCapture(text);
+        return;
+      }
+      const kind =
+        intent === "appointment_create_or_update"
+          ? "appointment"
+          : intent === "pickup_reminder"
+            ? "pickup"
+            : intent === "health_check_reminder"
+              ? "check"
+              : intent === "medicine_reminder"
+                ? "medicine"
+                : "reminder";
+      if (intent === "after_visit_note") {
+        setClarify(result.clarificationQuestion || "Saved notes need a person and confirmation. Open Memory after you confirm a visit note in review.");
+        router.push(`/new?kind=reminder&text=${encodeURIComponent(text)}`);
+        return;
+      }
+      router.push(`/new?kind=${kind}&text=${encodeURIComponent(text)}`);
+    } catch {
+      return "Interpretation failed. Your text is still here — try again.";
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const saveHealth = () => {
+    if (!pendingHealth?.memberId || !pendingHealth.kind || !pendingHealth.value) return;
+    setBusy(true);
+    try {
+      const who = memberById(state, pendingHealth.memberId);
+      commit((s) => upsertMeasurement(s, { familyMemberId: pendingHealth.memberId!, kind: pendingHealth.kind!, value: pendingHealth.value!, unit: pendingHealth.unit ?? "", source: "wispr" }));
       setSaved(`Saved to ${who?.name}'s health card.`);
-      setPending(null);
+      setPendingHealth(null);
       toast.success(`Saved to ${who?.name}'s health card.`);
     } catch {
       toast.error("We couldn't update this health record. Please try again.");
@@ -77,8 +139,37 @@ export function SmaranSpeakBox({
     }
   };
 
-  const member = pending ? memberById(state, pending.memberId) : undefined;
-  const previous = pending?.memberId && pending.kind ? latestMeasurement(state, pending.memberId, pending.kind) : undefined;
+  const saveFact = () => {
+    if (!pendingFact?.memberId || !pendingFact.familyFact) return;
+    update((s) => updateMember(s, pendingFact.memberId!, { age: pendingFact.familyFact!.value }));
+    setSaved(`Updated ${pendingFact.memberName}'s age.`);
+    setPendingFact(null);
+  };
+
+  const applyAppt = () => {
+    const result = pendingAppt;
+    if (!result?.matchedAppointmentIds?.[0]) return;
+    const id = result.matchedAppointmentIds[0];
+    if (result.intent === "appointment_complete") {
+      update((s) => setAppointmentStatus(s, id, "completed"));
+      toast.success("Appointment marked completed");
+    } else if (result.intent === "appointment_cancel") {
+      update((s) => setAppointmentStatus(s, id, "cancelled"));
+      toast.success("Appointment cancelled");
+    } else if (result.intent === "appointment_reschedule") {
+      if (!result.date || !result.time) {
+        setClarify("I need the new date and time.");
+        return;
+      }
+      update((s) => updateAppointment(s, id, { date: result.date, time: result.time }));
+      toast.success("Appointment rescheduled");
+    }
+    setPendingAppt(null);
+  };
+
+  const member = pendingHealth ? memberById(state, pendingHealth.memberId) : undefined;
+  const previous = pendingHealth?.memberId && pendingHealth.kind ? latestMeasurement(state, pendingHealth.memberId, pendingHealth.kind) : undefined;
+  const appt = pendingAppt?.matchedAppointmentIds?.[0] ? state.appointments.find((a) => a.id === pendingAppt.matchedAppointmentIds![0]) : undefined;
 
   return (
     <div className={className}>
@@ -90,32 +181,62 @@ export function SmaranSpeakBox({
         examples={examples}
         examplesAction="fill"
         busy={busy}
-        busyLabel="Got it. Organizing this for you…"
+        busyLabel="Working on what you wrote…"
         onSubmit={onSubmit}
       />
-      {pending && pending.kind && pending.value && (
+      {clarify && (
+        <p role="status" className="mt-3 rounded-[16px] border border-line bg-sand/40 px-4 py-3 text-[14.5px] font-semibold text-ink">
+          {clarify}
+        </p>
+      )}
+      {pendingHealth && pendingHealth.kind && pendingHealth.value && (
         <div className="mt-3 rounded-[20px] border border-peach bg-peach-soft/30 p-4" role="dialog" aria-label="Confirm measurement">
           <p className="text-[11px] font-extrabold tracking-[0.16em] text-ink-muted uppercase">SMARAN understood</p>
-          <p className="mt-2 text-[13.5px] italic text-ink-muted">“{pending.transcript}”</p>
+          <p className="mt-2 text-[13.5px] italic text-ink-muted">“{pendingHealth.transcript}”</p>
           <div className="mt-3">
             <div className="text-[20px] font-extrabold text-ink-strong">{member?.name}</div>
-            <div className="text-[14px] text-ink-muted">{healthLabel(pending.kind)}</div>
+            <div className="text-[14px] text-ink-muted">{healthLabel(pendingHealth.kind)}</div>
             <div className="mt-1 text-[26px] font-extrabold text-ink-strong">
-              {pending.kind === "blood_pressure" ? pending.value!.replace("/", " / ") : pending.value}{" "}
-              <span className="text-[16px] font-bold text-ink-muted">{pending.unit}</span>
+              {pendingHealth.kind === "blood_pressure" ? pendingHealth.value!.replace("/", " / ") : pendingHealth.value}{" "}
+              <span className="text-[16px] font-bold text-ink-muted">{pendingHealth.unit}</span>
             </div>
-            {previous && previous.value !== pending.value && (
+            {previous && previous.value !== pendingHealth.value && (
               <p className="mt-1 text-[13px] text-ink-muted">
-                Was {previous.value} {previous.unit} → now {pending.value} {pending.unit}
+                Was {previous.value} {previous.unit} → now {pendingHealth.value} {pendingHealth.unit}
               </p>
             )}
             <div className="text-[13px] text-ink-muted">{formatLong(todayOf(state))}</div>
           </div>
           <p className="mt-3 text-[15px] font-bold text-ink-strong">Save to {member?.name}&apos;s health card?</p>
           <div className="mt-3 flex flex-wrap gap-2">
-            <Button onClick={save} disabled={busy}>Confirm</Button>
-            <Button variant="outline" onClick={() => setPending(null)}>Edit</Button>
-            <Button variant="ghost" onClick={() => setPending(null)}>Cancel</Button>
+            <Button onClick={saveHealth} disabled={busy}>Confirm</Button>
+            <Button variant="outline" onClick={() => setPendingHealth(null)}>Edit</Button>
+            <Button variant="ghost" onClick={() => setPendingHealth(null)}>Cancel</Button>
+          </div>
+        </div>
+      )}
+      {pendingFact && (
+        <div className="mt-3 rounded-[20px] border border-peach bg-peach-soft/30 p-4" role="dialog">
+          <p className="text-[15px] font-bold text-ink-strong">
+            Save {pendingFact.memberName}&apos;s age as {pendingFact.familyFact?.value}?
+          </p>
+          <p className="mt-1 text-[13px] text-ink-muted">This is a family-reported fact, not a clinical record.</p>
+          <div className="mt-3 flex gap-2">
+            <Button onClick={saveFact}>Confirm</Button>
+            <Button variant="outline" onClick={() => setPendingFact(null)}>Cancel</Button>
+          </div>
+        </div>
+      )}
+      {pendingAppt && appt && (
+        <div className="mt-3 rounded-[20px] border border-peach bg-peach-soft/30 p-4" role="dialog">
+          <p className="text-[15px] font-bold text-ink-strong">
+            {pendingAppt.intent === "appointment_complete" && `Mark ${appt.doctor} (${memberById(state, appt.familyMemberId)?.name}) completed?`}
+            {pendingAppt.intent === "appointment_cancel" && `Cancel ${appt.doctor} on ${appt.date}?`}
+            {pendingAppt.intent === "appointment_reschedule" && `Move ${appt.doctor} to ${pendingAppt.date} ${pendingAppt.time ?? appt.time}?`}
+          </p>
+          <div className="mt-3 flex gap-2">
+            <Button onClick={applyAppt}>Confirm</Button>
+            <Button variant="outline" onClick={() => setPendingAppt(null)}>Cancel</Button>
           </div>
         </div>
       )}

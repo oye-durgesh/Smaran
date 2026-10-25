@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { CalendarDays, ChevronRight, FileText, MapPin, Paperclip, Pill, Stethoscope, Activity, HeartPulse, ScanLine, ClipboardList } from "lucide-react";
+import { CalendarDays, ChevronRight, FileText, MapPin, Paperclip, Pill, Stethoscope, Activity, HeartPulse, ScanLine, ClipboardList, ShoppingBag } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { Appointment, FamilyMember, HealthDocument } from "@/lib/types";
 import type { AgendaItem } from "@/lib/selectors";
@@ -11,7 +11,7 @@ import { MemberAvatar, StatusBadge, statusBarClass, Surface } from "./primitives
 
 /* ---------- Agenda / reminder card ---------- */
 
-const KIND_ICON = { medicine: Pill, check: HeartPulse, other: Activity } as const;
+const KIND_ICON = { medicine: Pill, check: HeartPulse, pickup: ShoppingBag, other: Activity } as const;
 
 export function AgendaCard({ item, today, onSend, compact }: { item: AgendaItem; today: string; onSend?: (reminderId: string) => void; compact?: boolean }) {
   if (item.kind === "appointment") {
@@ -82,7 +82,7 @@ function TimeColumn({ time }: { time: string }) {
 /* ---------- Appointment card ---------- */
 
 export function AppointmentCard({ appointment, member, today }: { appointment: Appointment; member?: FamilyMember; today: string }) {
-  const done = appointment.status === "completed" || appointment.date < today;
+  const done = appointment.status === "completed" || appointment.status === "cancelled";
   return (
     <Link href={`/appointments/${appointment.id}`} className="group block">
       <Surface className="@container relative flex items-center gap-4 overflow-hidden p-4 pl-5 transition-colors group-hover:border-line-strong">
@@ -102,7 +102,7 @@ export function AppointmentCard({ appointment, member, today }: { appointment: A
             </div>
           )}
         </div>
-        <StatusBadge status={done ? "completed" : "upcoming"} />
+        <StatusBadge status={appointment.status === "cancelled" ? "cancelled" : done ? "completed" : "upcoming"} />
       </Surface>
     </Link>
   );

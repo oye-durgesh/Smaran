@@ -17,6 +17,7 @@ export function classifyReply(text: string): ReplyIntent {
 
 export function openingMessage(name: string, title: string, kind: ReminderKind): string {
   if (kind === "medicine") return `${name}, medicine ka time ho gaya. 💊`;
+  if (kind === "pickup") return `${name}, pharmacy pickup ka time ho gaya.`;
   return `${name}, ${title} ka time ho gaya.`;
 }
 

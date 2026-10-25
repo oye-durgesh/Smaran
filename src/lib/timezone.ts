@@ -1,0 +1,69 @@
+/** Default family timezone. Relative dates resolve here, never against the demo clock. */
+export const FAMILY_TIMEZONE = "Asia/Kolkata";
+
+export interface ZonedNow {
+  date: string;
+  time: string;
+  weekday: number;
+  timestamp: string;
+  timezone: string;
+}
+
+function partsInZone(date: Date, timeZone: string): Record<string, string> {
+  const fmt = new Intl.DateTimeFormat("en-US", {
+    timeZone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    weekday: "short",
+    hourCycle: "h23",
+  });
+  const out: Record<string, string> = {};
+  for (const p of fmt.formatToParts(date)) {
+    if (p.type !== "literal") out[p.type] = p.value;
+  }
+  return out;
+}
+
+const WEEKDAY_INDEX: Record<string, number> = { Sun: 0, Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6 };
+
+export function zonedNow(timeZone = FAMILY_TIMEZONE, at: Date = new Date()): ZonedNow {
+  const p = partsInZone(at, timeZone);
+  const date = `${p.year}-${p.month}-${p.day}`;
+  const time = `${p.hour}:${p.minute}`;
+  return {
+    date,
+    time,
+    weekday: WEEKDAY_INDEX[p.weekday] ?? 0,
+    timestamp: `${date}T${time}`,
+    timezone: timeZone,
+  };
+}
+
+export function addCalendarDays(dateKey: string, days: number): string {
+  const [y, m, d] = dateKey.split("-").map(Number);
+  const dt = new Date(Date.UTC(y, m - 1, d + days));
+  const yy = dt.getUTCFullYear();
+  const mm = String(dt.getUTCMonth() + 1).padStart(2, "0");
+  const dd = String(dt.getUTCDate()).padStart(2, "0");
+  return `${yy}-${mm}-${dd}`;
+}
+
+export function weekdayOf(dateKey: string): number {
+  const [y, m, d] = dateKey.split("-").map(Number);
+  return new Date(Date.UTC(y, m - 1, d)).getUTCDay();
+}
+
+export function isDateKey(value: string | undefined): value is string {
+  return Boolean(value && /^\d{4}-\d{2}-\d{2}$/.test(value));
+}
+
+export function isTimeKey(value: string | undefined): value is string {
+  return Boolean(value && /^([01]\d|2[0-3]):[0-5]\d$/.test(value));
+}
+
+export function compareDateKeys(a: string, b: string): number {
+  return a < b ? -1 : a > b ? 1 : 0;
+}

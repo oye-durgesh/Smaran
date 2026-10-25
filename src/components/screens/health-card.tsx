@@ -49,7 +49,7 @@ export function HealthCardScreen() {
   const copy = async () => {
     try {
       await navigator.clipboard.writeText(shareUrl);
-      toast.success("Link copied");
+      toast.success("Link copied — it only works on this browser unless you print to PDF.");
     } catch {
       toast("Copy the link from the box above.");
     }

@@ -122,8 +122,8 @@ export function ReminderDraftEditor({
           <Label>Frequency</Label>
           <PillGroup
             label="Frequency"
-            value={local.frequency}
-            onChange={(f) => setLocal({ ...local, frequency: f })}
+            value={local.frequency ?? ""}
+            onChange={(f) => setLocal({ ...local, frequency: f as ReminderDraft["frequency"] })}
             options={[
               { value: "daily", label: "Every day" },
               { value: "weekly", label: "Every week" },

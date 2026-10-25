@@ -27,7 +27,7 @@ export interface FamilyMember {
   createdAt: LocalTimestamp;
 }
 
-export type ReminderKind = "medicine" | "check" | "other";
+export type ReminderKind = "medicine" | "check" | "pickup" | "other";
 export type ReminderFrequency = "daily" | "weekly" | "once";
 export type ReminderLifecycle = "active" | "paused";
 
@@ -71,7 +71,7 @@ export interface AppointmentReminder {
   enabled: boolean;
 }
 
-export type AppointmentStatus = "upcoming" | "completed";
+export type AppointmentStatus = "upcoming" | "completed" | "cancelled";
 
 export interface Appointment {
   id: ID;

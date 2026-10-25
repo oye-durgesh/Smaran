@@ -45,13 +45,14 @@ export function MemberAvatar({ member, size = 44, className }: { member?: Family
 
 /* ---------- Status ---------- */
 
-const STATUS: Record<ReminderDayStatus | "completed", { label: string; cls: string; bar: string; icon: typeof Check }> = {
+const STATUS: Record<ReminderDayStatus | "completed" | "cancelled", { label: string; cls: string; bar: string; icon: typeof Check }> = {
   confirmed: { label: "Confirmed", cls: "bg-confirmed-bg text-confirmed", bar: "bg-confirmed", icon: Check },
   waiting: { label: "Waiting", cls: "bg-waiting-bg text-waiting", bar: "bg-peach", icon: Clock3 },
   upcoming: { label: "Upcoming", cls: "bg-upcoming-bg text-upcoming", bar: "bg-terracotta", icon: CalendarClock },
   missed: { label: "Missed", cls: "bg-missed-bg text-missed", bar: "bg-missed", icon: CircleAlert },
   paused: { label: "Paused", cls: "bg-paused-bg text-paused", bar: "bg-line-strong", icon: Pause },
   completed: { label: "Completed", cls: "bg-paused-bg text-brown", bar: "bg-line-strong", icon: Check },
+  cancelled: { label: "Cancelled", cls: "bg-missed-bg text-missed", bar: "bg-missed", icon: CircleAlert },
 };
 
 export const statusBarClass = (status: keyof typeof STATUS) => STATUS[status].bar;

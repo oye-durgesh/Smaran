@@ -183,8 +183,8 @@ export function TodayScreen() {
         {list}
         <div className="mt-8 flex items-center justify-between gap-3">
           <SectionLabel className="mb-0">Shortcuts</SectionLabel>
-          <Link href="/new?kind=reminder" className="inline-flex h-9 items-center gap-1.5 rounded-full border border-line-strong bg-surface-raised px-3.5 text-[13px] font-bold text-ink hover:border-peach">
-            <Plus className="size-4" aria-hidden /> Add reminder
+          <Link href="/medicines" className="inline-flex h-9 items-center gap-1.5 rounded-full border border-line-strong bg-surface-raised px-3.5 text-[13px] font-bold text-ink hover:border-peach">
+            <Plus className="size-4" aria-hidden /> Medicine reminders
           </Link>
         </div>
         <div className="mt-3">

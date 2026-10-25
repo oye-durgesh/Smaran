@@ -13,7 +13,13 @@ function emit() {
 }
 
 function migrate(parsed: AppState): AppState {
-  if (parsed.version === STATE_VERSION && Array.isArray(parsed.measurements)) return parsed;
+  if (parsed.version === STATE_VERSION && Array.isArray(parsed.measurements)) {
+    return {
+      ...parsed,
+      reminders: parsed.reminders.map((r) => ({ ...r, kind: r.kind === "pickup" || r.kind === "check" || r.kind === "medicine" ? r.kind : r.kind === "other" ? "other" : "other" })),
+      appointments: parsed.appointments.map((a) => ({ ...a, status: a.status === "completed" || a.status === "cancelled" ? a.status : "upcoming" })),
+    };
+  }
   const seed = createDemoState();
   return {
     ...parsed,

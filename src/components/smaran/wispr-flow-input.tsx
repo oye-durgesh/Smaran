@@ -22,9 +22,14 @@ export interface WisprFlowInputProps {
   support?: string;
 }
 
-const CAPTURE_ERROR = "We couldn't capture that. You can type instead.";
+const CAPTURE_ERROR = "Add some text first — SMARAN does not record audio here.";
 const WISPR_PROMOTE = "Use Wispr Flow for better voice capture";
-const DEFAULT_SUPPORT = "Speak naturally — SMARAN will organize it for you.";
+const DEFAULT_SUPPORT = "Dictate with Wispr Flow or type. SMARAN never listens through the browser.";
+
+function readField(el: HTMLTextAreaElement | null, fallback: string): string {
+  const dom = el?.value ?? "";
+  return (dom.length >= fallback.length ? dom : fallback).replace(/\u00a0/g, " ");
+}
 
 export function Waveform({ active, className }: { active: boolean; className?: string }) {
   return (
@@ -45,7 +50,7 @@ export function WisprFlowInput({
   examples = [],
   onSubmit,
   busy = false,
-  busyLabel = "Got it. Organizing this for you…",
+  busyLabel = "Working on what you wrote…",
   error: externalError,
   variant = "card",
   primary = false,
@@ -57,10 +62,39 @@ export function WisprFlowInput({
   const inputId = useId();
   const helperId = useId();
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const onSubmitRef = useRef(onSubmit);
+  const inFlight = useRef(false);
   const [value, setValue] = useState("");
   const [phase, setPhase] = useState<Phase>("idle");
   const [error, setError] = useState<string | null>(null);
   const [rotate, setRotate] = useState(0);
+
+  useEffect(() => {
+    onSubmitRef.current = onSubmit;
+  }, [onSubmit]);
+
+  useEffect(() => {
+    const el = textareaRef.current;
+    if (!el) return;
+    const sync = () => {
+      const next = el.value.replace(/\u00a0/g, " ");
+      setValue((prev) => (prev === next ? prev : next));
+      setPhase((p) => {
+        if (p === "error") return p;
+        return next.trim() ? "ready" : "idle";
+      });
+    };
+    el.addEventListener("input", sync);
+    el.addEventListener("change", sync);
+    el.addEventListener("paste", () => window.requestAnimationFrame(sync));
+    const mo = new MutationObserver(sync);
+    mo.observe(el, { childList: true, characterData: true, subtree: true, attributes: true, attributeFilter: ["value"] });
+    return () => {
+      el.removeEventListener("input", sync);
+      el.removeEventListener("change", sync);
+      mo.disconnect();
+    };
+  }, []);
 
   useEffect(() => {
     if (!examples.length || value.trim() || busy) return;
@@ -70,32 +104,40 @@ export function WisprFlowInput({
     return () => window.clearInterval(t);
   }, [examples.length, value, busy]);
 
-  const submit = useCallback(
-    async (text: string) => {
-      const trimmed = text.trim();
-      if (!trimmed) {
-        setError(CAPTURE_ERROR);
-        setPhase("error");
-        return;
-      }
-      setError(null);
-      const result = await onSubmit(trimmed);
+  const onChange = (next: string) => {
+    setValue(next);
+    if (phase === "error") setError(null);
+    setPhase(next.trim() ? "ready" : "idle");
+  };
+
+  const submit = useCallback(async () => {
+    if (inFlight.current || busy) return;
+    const trimmed = readField(textareaRef.current, value).trim();
+    if (!trimmed) {
+      setError(CAPTURE_ERROR);
+      setPhase("error");
+      return;
+    }
+    setValue(trimmed);
+    inFlight.current = true;
+    setError(null);
+    try {
+      const result = await onSubmitRef.current(trimmed);
       if (typeof result === "string") {
         setError(result);
         setPhase("error");
         return;
       }
       setValue("");
+      if (textareaRef.current) textareaRef.current.value = "";
       setPhase("idle");
-    },
-    [onSubmit],
-  );
-
-  const onChange = (next: string) => {
-    setValue(next);
-    if (phase === "error") setError(null);
-    setPhase(next.trim() ? "ready" : "idle");
-  };
+    } catch {
+      setError("We couldn't process that. Your text is still here — try again.");
+      setPhase("error");
+    } finally {
+      inFlight.current = false;
+    }
+  }, [busy, value]);
 
   const shownError = externalError ?? error;
   const effectivePhase: Phase | "busy" = busy ? "busy" : shownError ? "error" : phase;
@@ -105,6 +147,7 @@ export function WisprFlowInput({
 
   void primary;
   void examplesLabel;
+  void examplesAction;
 
   const errorRow = effectivePhase === "error" && shownError && (
     <div role="alert" className="mt-3 flex items-center justify-between gap-3 rounded-[14px] bg-missed-bg/70 px-3 py-2 text-[13px] font-semibold text-missed">
@@ -145,11 +188,12 @@ export function WisprFlowInput({
           id={inputId}
           value={value}
           rows={variant === "composer" ? 1 : 3}
+          onInput={(e) => onChange(e.currentTarget.value)}
           onChange={(e) => onChange(e.target.value)}
           onKeyDown={(e) => {
             if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
               e.preventDefault();
-              void submit(value);
+              void submit();
             }
           }}
           placeholder={hasText ? placeholder : rotating}
@@ -168,7 +212,7 @@ export function WisprFlowInput({
         )}
         <button
           type="button"
-          onClick={() => void submit(value)}
+          onClick={() => void submit()}
           disabled={busy || !hasText}
           aria-label="Send to SMARAN"
           className="mb-0.5 inline-flex size-11 shrink-0 items-center justify-center rounded-[14px] bg-peach text-ink-strong transition-colors hover:bg-[#e29c7e] focus-visible:ring-2 focus-visible:ring-peach-deep disabled:bg-ivory-deep disabled:text-ink-muted/50"
@@ -180,7 +224,10 @@ export function WisprFlowInput({
       {!hasText && !busy && examples.length > 0 && (
         <button
           type="button"
-          onClick={() => (examplesAction === "submit" ? void submit(rotating) : onChange(rotating))}
+          onClick={() => {
+            onChange(rotating);
+            textareaRef.current?.focus();
+          }}
           className="mt-3 w-full text-left text-[13.5px] leading-snug text-ink-muted transition-colors hover:text-ink"
         >
           Try saying: <span className="font-semibold text-ink">“{rotating}”</span>

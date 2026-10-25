@@ -41,7 +41,8 @@ export function latestConfirmation(reminder: Reminder): Confirmation | undefined
   return [...reminder.confirmationHistory].sort((a, b) => (a.confirmedAt < b.confirmedAt ? 1 : -1))[0];
 }
 
-export function frequencyLabel(reminder: Pick<Reminder, "frequency" | "weekday" | "date">): string {
+export function frequencyLabel(reminder: Pick<Reminder, "weekday" | "date"> & { frequency?: Reminder["frequency"] }): string {
+  if (!reminder.frequency) return "How often?";
   if (reminder.frequency === "daily") return "Every day";
   if (reminder.frequency === "weekly") return `Every ${weekdayName(addDays("2026-10-18", reminder.weekday ?? 0))}`;
   return "Once";
@@ -62,7 +63,7 @@ export function nextOccurrence(reminder: Reminder, state: AppState): DateKey | n
 
 export type AgendaItem =
   | { kind: "reminder"; id: string; time: string; reminder: Reminder; member?: FamilyMember; status: ReminderDayStatus; confirmation?: Confirmation }
-  | { kind: "appointment"; id: string; time: string; appointment: Appointment; member?: FamilyMember; status: "upcoming" | "completed" };
+  | { kind: "appointment"; id: string; time: string; appointment: Appointment; member?: FamilyMember; status: Appointment["status"] };
 
 export function agendaFor(state: AppState, date: DateKey, memberId?: string): AgendaItem[] {
   const items: AgendaItem[] = [];
@@ -113,10 +114,17 @@ export function upcomingAppointments(state: AppState, memberId?: string): Appoin
 }
 
 export function completedAppointments(state: AppState, memberId?: string): Appointment[] {
-  const today = todayOf(state);
   return state.appointments
-    .filter((a) => (a.status === "completed" || a.date < today) && (!memberId || a.familyMemberId === memberId))
+    .filter((a) => a.status === "completed" && (!memberId || a.familyMemberId === memberId))
     .sort((a, b) => (a.date + a.time < b.date + b.time ? 1 : -1));
+}
+
+export function cancelledAppointments(state: AppState, memberId?: string): Appointment[] {
+  return state.appointments.filter((a) => a.status === "cancelled" && (!memberId || a.familyMemberId === memberId));
+}
+
+export function medicineReminders(state: AppState, memberId?: string): Reminder[] {
+  return state.reminders.filter((r) => r.kind === "medicine" && (!memberId || r.familyMemberId === memberId));
 }
 
 export function documentsFor(state: AppState, memberId?: string): HealthDocument[] {

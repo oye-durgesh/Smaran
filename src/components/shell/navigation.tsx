@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { CalendarDays, FileText, Home, MessageCircleQuestion, Settings, Users, History } from "lucide-react";
+import { CalendarDays, FileText, Home, MessageCircleQuestion, Settings, Users, History, Pill } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useT, type StringKey } from "@/lib/i18n";
 import { useAppState } from "@/lib/store/store";
@@ -17,7 +17,8 @@ interface NavItem {
 }
 
 const NAV: Record<string, NavItem> = {
-  today: { href: "/today", key: "today", icon: Home, match: (p) => p === "/today" || p.startsWith("/reminders") || p === "/new" },
+  today: { href: "/today", key: "today", icon: Home, match: (p) => p === "/today" || p === "/new" },
+  medicines: { href: "/medicines", key: "medicines", icon: Pill, match: (p) => p.startsWith("/medicines") || p.startsWith("/reminders") },
   family: { href: "/family", key: "family", icon: Users, match: (p) => p.startsWith("/family") || p.startsWith("/health-card") },
   appointments: { href: "/appointments", key: "appointments", icon: CalendarDays, match: (p) => p.startsWith("/appointments") },
   documents: { href: "/documents", key: "documents", icon: FileText, match: (p) => p.startsWith("/documents") },
@@ -26,8 +27,8 @@ const NAV: Record<string, NavItem> = {
   settings: { href: "/settings", key: "settings", icon: Settings, match: (p) => p.startsWith("/settings") },
 };
 
-const MOBILE_TABS = [NAV.today, NAV.family, NAV.appointments, NAV.documents, NAV.ask];
-const DESKTOP_ITEMS = [NAV.today, NAV.family, NAV.appointments, NAV.documents, NAV.memory, NAV.ask, NAV.settings];
+const MOBILE_TABS = [NAV.today, NAV.medicines, NAV.family, NAV.appointments, NAV.ask];
+const DESKTOP_ITEMS = [NAV.today, NAV.medicines, NAV.family, NAV.appointments, NAV.documents, NAV.memory, NAV.ask, NAV.settings];
 
 export function BottomNavigation({ className }: { className?: string }) {
   const path = usePathname();

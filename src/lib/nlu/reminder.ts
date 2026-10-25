@@ -5,16 +5,17 @@ export interface ReminderDraft {
   transcript: string;
   memberId?: string;
   title?: string;
+  medicineName?: string;
   kind: ReminderKind;
   time?: TimeKey;
-  frequency: ReminderFrequency;
+  frequency?: ReminderFrequency;
   date?: DateKey;
   weekday?: number;
   /** Plain-language notes about anything SMARAN inferred rather than heard. */
   assumptions: string[];
 }
 
-export type ReminderField = "memberId" | "title" | "time";
+export type ReminderField = "memberId" | "title" | "time" | "frequency";
 
 const TIME_QUALIFIERS: Record<string, string> = {
   subah: "Morning", subha: "Morning", morning: "Morning",
@@ -64,13 +65,32 @@ function activityTitle(t: string): string | null {
   return null;
 }
 
-export function parseReminder(text: string, family: FamilyMember[], today: DateKey): ReminderDraft {
+export function parseReminder(
+  text: string,
+  family: FamilyMember[],
+  today: DateKey,
+  opts: { inventFrequency?: boolean; inventTitle?: boolean } = {},
+): ReminderDraft {
+  const inventFrequency = opts.inventFrequency ?? false;
+  const inventTitle = opts.inventTitle ?? false;
   const t = normalize(text);
   const assumptions: string[] = [];
   const person = findPerson(text, family);
 
-  let kind: ReminderKind = "medicine";
+  let kind: ReminderKind = "other";
   let title = medicineTitle(t);
+  let medicineName: string | undefined;
+  if (title) {
+    kind = "medicine";
+    const named = t.match(new RegExp(`\\b([a-z0-9]+)\\s+(?:ki|ka|ke|wali|vali)?\\s*${MEDICINE}\\b`));
+    if (named && !TIME_QUALIFIERS[named[1]] && !QUALIFIER_STOPWORDS.has(named[1]) && !/^\d+$/.test(named[1])) {
+      medicineName = titleCase(named[1]);
+    }
+    if (/\binsulin\b/.test(t)) medicineName = "Insulin";
+    if (!medicineName && !inventTitle) {
+      title = title === "Medicine" || / Medicine$/.test(title) ? title : title;
+    }
+  }
   if (!title) {
     title = checkTitle(t);
     if (title) kind = "check";
@@ -79,11 +99,15 @@ export function parseReminder(text: string, family: FamilyMember[], today: DateK
     title = activityTitle(t);
     if (title) kind = "other";
   }
+  if (/\b(pick\s*up|pickup|pharmacy|refill)\b/.test(t)) {
+    kind = "pickup";
+    title = title && title !== "Medicine" ? `${title} pickup` : "Pharmacy pickup";
+  }
 
   const parsedTime = findTime(text, "any");
   if (parsedTime?.assumedPeriod) assumptions.push(`I assumed ${Number(parsedTime.time.slice(0, 2)) >= 12 ? "PM" : "AM"} — change it if that's wrong.`);
 
-  let frequency: ReminderFrequency = "daily";
+  let frequency: ReminderFrequency | undefined;
   let date: DateKey | undefined;
   let weekdayValue: number | undefined;
   const daily = /\b(roz|rozana|roj|daily|every day|everyday|har din|har roz|each day|every night|every morning|har raat|har subah|har shaam)\b/.test(t);
@@ -91,12 +115,15 @@ export function parseReminder(text: string, family: FamilyMember[], today: DateK
   if (weekly) {
     frequency = "weekly";
     weekdayValue = findWeekday(text) ?? undefined;
-  } else if (!daily) {
+  } else if (daily) {
+    frequency = "daily";
+  } else {
     const parsedDate = findDate(text, today);
     if (parsedDate) {
       frequency = "once";
       date = parsedDate.date;
-    } else {
+    } else if (inventFrequency) {
+      frequency = "daily";
       assumptions.push("You didn't say how often, so I set it for every day.");
     }
   }
@@ -105,6 +132,7 @@ export function parseReminder(text: string, family: FamilyMember[], today: DateK
     transcript: text.trim(),
     memberId: person?.id,
     title: title ?? undefined,
+    medicineName,
     kind,
     time: parsedTime?.time,
     frequency,
@@ -119,6 +147,7 @@ export function missingReminderFields(draft: ReminderDraft): ReminderField[] {
   if (!draft.memberId) missing.push("memberId");
   if (!draft.title) missing.push("title");
   if (!draft.time) missing.push("time");
+  if (!draft.frequency) missing.push("frequency");
   return missing;
 }
 
@@ -129,6 +158,7 @@ export function refineReminder(draft: ReminderDraft, followUp: string, family: F
     ...draft,
     memberId: draft.memberId ?? extra.memberId,
     title: draft.title ?? extra.title,
+    medicineName: draft.medicineName ?? extra.medicineName,
     kind: draft.title ? draft.kind : extra.kind,
     time: draft.time ?? extra.time,
     assumptions: draft.time ? draft.assumptions : [...draft.assumptions.filter((a) => !a.startsWith("I assumed")), ...extra.assumptions.filter((a) => a.startsWith("I assumed"))],

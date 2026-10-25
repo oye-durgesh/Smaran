@@ -257,6 +257,18 @@ export function AppointmentDetailScreen() {
       >
         <CheckCircle2 className="size-4" aria-hidden /> {done ? "Mark upcoming" : "Mark done"}
       </Button>
+      {appointment.status !== "cancelled" && (
+        <Button
+          variant="outline"
+          className="col-span-2"
+          onClick={() => {
+            update((s) => setAppointmentStatus(s, appointment.id, "cancelled"));
+            toast.success("Appointment cancelled");
+          }}
+        >
+          Cancel appointment
+        </Button>
+      )}
     </div>
   );
 

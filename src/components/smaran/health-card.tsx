@@ -43,7 +43,7 @@ function HealthSummary({ state, memberId, onRemove, onAdd }: { state: AppState; 
                 <span className="block text-[12.5px] text-ink-muted">
                   {m
                     ? `${m.source === "sample" ? "Sample family note · " : m.source === "document" ? `Source: ${state.documents.find((d) => d.id === m.documentId)?.name ?? "document"} · ` : ""}${formatShort(dateOf(m.recordedAt))} · ${formatTime(timeOf(m.recordedAt))}`
-                    : "Not saved yet"}
+                    : "Not recorded"}
                 </span>
               </span>
               <span className="inline-flex items-center gap-2">
@@ -141,10 +141,10 @@ export function HealthCard({ state, member, linked = true, className, wide = fal
           ) : null}
         </Block>
 
-        <Block title="Medicines & checks" empty="No reminders yet.">
-          {reminders.length > 0 ? (
+        <Block title="Medicine reminders" empty="No medicine reminders recorded.">
+          {reminders.filter((r) => r.kind === "medicine").length > 0 ? (
             <ul className="space-y-1">
-              {reminders.map((r) => (
+              {reminders.filter((r) => r.kind === "medicine").map((r) => (
                 <li key={r.id}>
                   <Wrap linked={linked} href={`/reminders/${r.id}`} className="-mx-2 px-2 py-1.5">
                     <div className="text-[16px] font-bold text-ink-strong">

@@ -4,7 +4,7 @@ import { useState } from "react";
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { toast } from "sonner";
-import { BellRing, Check, MessageCircle, Pause, Pencil, Play, Pill, Trash2, HeartPulse, Activity } from "lucide-react";
+import { BellRing, Check, MessageCircle, Pause, Pencil, Play, Pill, Trash2, HeartPulse, Activity, ShoppingBag } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useStore } from "@/lib/store/store";
 import { useView } from "@/lib/store/view";
@@ -19,7 +19,7 @@ import { Modal } from "@/components/smaran/modal";
 import { Button } from "@/components/ui/button";
 import type { ReminderDraft } from "@/lib/nlu";
 
-const ICON = { medicine: Pill, check: HeartPulse, other: Activity };
+const ICON = { medicine: Pill, check: HeartPulse, pickup: ShoppingBag, other: Activity };
 
 export function ReminderDetailScreen() {
   const { id } = useParams<{ id: string }>();
@@ -190,7 +190,7 @@ export function ReminderDetailScreen() {
         family={state.family}
         onSave={(d) => {
           update((s) => updateReminder(s, reminder.id, { title: d.title, time: d.time, frequency: d.frequency, familyMemberId: d.memberId, date: d.date, weekday: d.weekday }));
-          toast.success("Reminder updated", { description: describeReminder({ ...reminder, time: d.time!, frequency: d.frequency, date: d.date, weekday: d.weekday }) });
+          toast.success("Reminder updated", { description: describeReminder({ ...reminder, time: d.time!, frequency: d.frequency ?? reminder.frequency, date: d.date, weekday: d.weekday }) });
         }}
       />
       <Modal

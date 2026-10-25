@@ -6,6 +6,7 @@ import type { Language } from "./types";
 const STRINGS = {
   today: { en: "Today", hi: "आज" },
   family: { en: "Family", hi: "परिवार" },
+  medicines: { en: "Medicines", hi: "दवा" },
   appointments: { en: "Appointments", hi: "अपॉइंटमेंट" },
   documents: { en: "Documents", hi: "दस्तावेज़" },
   memory: { en: "Memory", hi: "स्मृति" },

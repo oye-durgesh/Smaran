@@ -9,7 +9,7 @@ import { cn } from "@/lib/utils";
 import { useStore } from "@/lib/store/store";
 import { useView } from "@/lib/store/view";
 import {
-  classifyCapture,
+  classifySmaranIntent,
   missingAppointmentFields,
   missingReminderFields,
   parseAppointment,
@@ -19,8 +19,9 @@ import {
   type AppointmentDraft,
   type ReminderDraft,
 } from "@/lib/nlu";
+import { zonedNow } from "@/lib/timezone";
 import { createAppointment, createReminder } from "@/lib/store/actions";
-import { describeReminder, documentsFor, memberById, todayOf } from "@/lib/selectors";
+import { describeReminder, documentsFor, memberById } from "@/lib/selectors";
 import { formatDayLong, formatShort, formatTime } from "@/lib/dates";
 import { Screen } from "@/components/shell/screen";
 import { useSendReminderNow } from "@/components/shell/use-send-reminder";
@@ -36,7 +37,7 @@ const EXAMPLES = {
   appointment: ["Mummy ka Dr Sharma ke saath Friday ko 11 baje appointment hai. Teen din pehle yaad dila dena.", "Papa ka kal shaam 5 baje Dr Mehta ke saath checkup hai at Apollo Hospital."],
 };
 
-type Kind = "reminder" | "appointment";
+type Kind = "reminder" | "appointment" | "medicine" | "pickup" | "check";
 type Phase = "input" | "processing" | "review" | "done";
 
 const FOLLOW_UP: Record<string, (name?: string) => string> = {
@@ -45,6 +46,7 @@ const FOLLOW_UP: Record<string, (name?: string) => string> = {
   time: (n) => `What time should I remind ${n ?? "them"}?`,
   doctor: () => "Which doctor is the appointment with?",
   date: () => "Which day is the appointment?",
+  frequency: () => "Is this once, every day, or weekly? I will not guess.",
 };
 
 export function CaptureScreen() {
@@ -53,20 +55,31 @@ export function CaptureScreen() {
   const { state, commit } = useStore();
   const { isWeb } = useView();
   const sendNow = useSendReminderNow();
-  const today = todayOf(state);
+  const today = zonedNow().date;
 
   const initialText = params.get("text");
   const fixedKind = (params.get("kind") as Kind | null) ?? null;
   const initial = useMemo(() => {
     if (!initialText) return null;
-    const intent = fixedKind ?? classifyCapture(initialText);
-    return { text: initialText, intent };
+    const smaran = classifySmaranIntent(initialText);
+    const intent =
+      fixedKind === "appointment" || smaran === "appointment_create_or_update"
+        ? "appointment"
+        : smaran === "ask_question" || smaran === "document_question"
+          ? "question"
+          : smaran === "unknown"
+            ? "unknown"
+            : smaran === "health_measurement"
+              ? "health"
+              : "reminder";
+    return { text: initialText, intent, smaran };
   }, [initialText, fixedKind]);
 
-  const [kind, setKind] = useState<Kind>(initial && (initial.intent === "appointment" || initial.intent === "reminder") ? initial.intent : fixedKind ?? "reminder");
-  const [phase, setPhase] = useState<Phase>(initial && (initial.intent === "appointment" || initial.intent === "reminder") ? "processing" : "input");
-  const [reminder, setReminder] = useState<ReminderDraft | null>(() => (initial?.intent === "reminder" ? parseReminder(initial.text, state.family, today) : null));
+  const [kind, setKind] = useState<Kind>(initial && initial.intent === "appointment" ? "appointment" : fixedKind ?? "reminder");
+  const [phase, setPhase] = useState<Phase>(initial && (initial.intent === "appointment" || initial.intent === "reminder") ? "review" : "input");
+  const [reminder, setReminder] = useState<ReminderDraft | null>(() => (initial?.intent === "reminder" ? parseReminder(initial.text, state.family, today, { inventFrequency: false, inventTitle: false }) : null));
   const [appointment, setAppointment] = useState<AppointmentDraft | null>(() => (initial?.intent === "appointment" ? parseAppointment(initial.text, state.family, today) : null));
+  const [unknownNote, setUnknownNote] = useState<string | null>(initial?.intent === "unknown" ? "That did not match a safe action. Nothing was created." : null);
   const [docIds, setDocIds] = useState<string[]>([]);
   const [result, setResult] = useState<{ id: string; merged: boolean } | null>(null);
 
@@ -77,35 +90,45 @@ export function CaptureScreen() {
   const onDone = useCallback(() => setPhase("review"), []);
 
   const submit = (text: string) => {
-    const intent = fixedKind ?? classifyCapture(text);
-    if (intent === "health") return;
-    if (intent === "question") {
+    const smaran = classifySmaranIntent(text);
+    if (smaran === "unknown") {
+      setUnknownNote("That did not match a safe action. Nothing was created.");
+      return;
+    }
+    if (smaran === "health_measurement") return;
+    if (smaran === "ask_question" || smaran === "document_question") {
       router.push(`/ask?q=${encodeURIComponent(text)}`);
       return;
     }
-    if (intent !== "appointment" && intent !== "reminder") return;
-    setKind(intent);
-    if (intent === "appointment") {
+    setUnknownNote(null);
+    if (smaran === "appointment_create_or_update" || fixedKind === "appointment") {
+      setKind("appointment");
       setAppointment(parseAppointment(text, state.family, today));
       setReminder(null);
     } else {
-      setReminder(parseReminder(text, state.family, today));
+      const draft = parseReminder(text, state.family, today, { inventFrequency: false, inventTitle: false });
+      if (smaran === "pickup_reminder") draft.kind = "pickup";
+      if (smaran === "medicine_reminder") draft.kind = "medicine";
+      if (smaran === "health_check_reminder") draft.kind = "check";
+      setKind(smaran === "pickup_reminder" ? "pickup" : smaran === "health_check_reminder" ? "check" : "medicine");
+      setReminder(draft);
       setAppointment(null);
     }
     setDocIds([]);
-    setPhase("processing");
+    setPhase("review");
   };
 
+  const isReminder = kind !== "appointment";
   const followUp = (text: string) => {
-    if (kind === "reminder" && reminder) setReminder(refineReminder(reminder, text, state.family, today));
+    if (isReminder && reminder) setReminder(refineReminder(reminder, text, state.family, today));
     if (kind === "appointment" && appointment) setAppointment(refineAppointment(appointment, text, state.family, today));
   };
 
-  const missing = kind === "reminder" ? (reminder ? missingReminderFields(reminder) : []) : appointment ? missingAppointmentFields(appointment) : [];
-  const draftMember = memberById(state, kind === "reminder" ? reminder?.memberId : appointment?.memberId);
-  const transcript = kind === "reminder" ? reminder?.transcript : appointment?.transcript;
+  const missing = isReminder ? (reminder ? missingReminderFields(reminder) : []) : appointment ? missingAppointmentFields(appointment) : [];
+  const draftMember = memberById(state, isReminder ? reminder?.memberId : appointment?.memberId);
+  const transcript = isReminder ? reminder?.transcript : appointment?.transcript;
   const duplicate =
-    kind === "reminder" && reminder?.memberId && reminder.title
+    isReminder && reminder?.memberId && reminder.title
       ? state.reminders.find((r) => r.familyMemberId === reminder.memberId && r.title.toLowerCase() === reminder.title!.toLowerCase())
       : kind === "appointment" && appointment?.memberId && appointment.doctor && appointment.date
         ? state.appointments.find((a) => a.familyMemberId === appointment.memberId && a.doctor === appointment.doctor && a.date === appointment.date && a.status === "upcoming")
@@ -113,7 +136,7 @@ export function CaptureScreen() {
 
   const create = () => {
     if (missing.length) return;
-    if (kind === "reminder" && reminder) {
+    if (isReminder && reminder) {
       const res = commit((s) => {
         const r = createReminder(s, reminder as Required<Pick<ReminderDraft, "memberId" | "title" | "time">> & ReminderDraft);
         return [r.state, { id: r.id, merged: r.merged }];
@@ -155,9 +178,10 @@ export function CaptureScreen() {
           subtitle="Say it the way you'd say it to family. SMARAN will pull out the details for you to check."
         />
         <SmaranSpeakBox context={kind === "appointment" ? "appointments" : "general"} onCapture={submit} />
+        {unknownNote && <p role="status" className="mt-3 rounded-[16px] bg-sand/50 px-4 py-3 text-[14px] font-semibold text-ink">{unknownNote}</p>}
         {!fixedKind && (
           <p className="mt-4 text-center text-[13px] text-ink-muted">
-            Works for medicines, checks and doctor appointments — in Hindi, English or both.
+            Works for medicines, checks, pickups and doctor appointments — in Hindi, English or both. Unknown text is not saved as a reminder.
           </p>
         )}
       </>
@@ -165,11 +189,12 @@ export function CaptureScreen() {
   } else if (phase === "processing") {
     body = (
       <>
-        <PageHeader eyebrow="SMARAN is listening" title="Understanding you…" />
+        <PageHeader eyebrow="Review" title="Checking the details you typed…" />
         <ProcessingState
           transcript={transcript}
-          steps={["Reading your words", "Aligning the details", kind === "appointment" ? "Preparing your appointment" : "Creating your reminder"]}
+          steps={["Reading your words", "Aligning the details", kind === "appointment" ? "Preparing your appointment" : "Preparing your reminder"]}
           layout={isWeb ? "horizontal" : "vertical"}
+          stepMs={0}
           onDone={onDone}
         />
       </>
@@ -186,12 +211,12 @@ export function CaptureScreen() {
           <div className="mb-3 flex items-center gap-2 text-[12px] font-extrabold tracking-[0.16em] text-ink-muted uppercase">
             <CheckCircle2 className="size-4 text-confirmed" aria-hidden /> {kind === "appointment" ? "Appointment" : "Reminder"}
           </div>
-          {kind === "reminder" && reminder && <ReminderUnderstood draft={reminder} family={state.family} onChange={setReminder} columns={isWeb ? 4 : 2} />}
+          {isReminder && reminder && <ReminderUnderstood draft={reminder} family={state.family} onChange={setReminder} columns={isWeb ? 4 : 2} />}
           {kind === "appointment" && appointment && <AppointmentUnderstood draft={appointment} family={state.family} onChange={setAppointment} />}
           {duplicate && !missing.length && (
             <p className="mt-4 flex items-start gap-2 rounded-[14px] bg-sand/50 px-3 py-2.5 text-[13.5px] text-ink">
               <Info className="mt-0.5 size-4 shrink-0 text-brown" aria-hidden />
-              {kind === "reminder"
+              {isReminder
                 ? `${draftMember?.name} already has ${reminder?.title}. SMARAN will update it and keep its confirmation history.`
                 : `${draftMember?.name} already has this appointment. SMARAN will update it with what you said.`}
             </p>
@@ -247,7 +272,7 @@ export function CaptureScreen() {
       </div>
     );
   } else if (phase === "done" && result) {
-    const r = kind === "reminder" ? state.reminders.find((x) => x.id === result.id) : undefined;
+    const r = isReminder ? state.reminders.find((x) => x.id === result.id) : undefined;
     const a = kind === "appointment" ? state.appointments.find((x) => x.id === result.id) : undefined;
     const member = memberById(state, r?.familyMemberId ?? a?.familyMemberId);
     body = (
@@ -256,7 +281,7 @@ export function CaptureScreen() {
           <Check className="size-10" strokeWidth={3} aria-hidden />
         </span>
         <h1 className="mt-6 text-[30px] font-extrabold text-ink-strong">
-          {kind === "reminder" ? (result.merged ? "Reminder updated" : "Reminder created") : result.merged ? "Appointment updated" : "Appointment saved"}
+          {isReminder ? (result.merged ? "Reminder updated" : "Reminder created") : result.merged ? "Appointment updated" : "Appointment saved"}
         </h1>
         {r && (
           <p className="mt-2 text-[17px] text-ink-muted">

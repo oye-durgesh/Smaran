@@ -68,7 +68,7 @@ export function createReminder(state: AppState, draft: Required<Pick<ReminderDra
   );
   const member = memberById(state, draft.memberId);
   if (existing) {
-    const updated: Reminder = { ...existing, time: draft.time, frequency: draft.frequency, date: draft.date, weekday: draft.weekday, status: "active" };
+    const updated: Reminder = { ...existing, time: draft.time, frequency: draft.frequency ?? existing.frequency, date: draft.date, weekday: draft.weekday, status: "active" };
     const next = { ...state, reminders: state.reminders.map((r) => (r.id === existing.id ? updated : r)) };
     return {
       id: existing.id,
@@ -90,7 +90,7 @@ export function createReminder(state: AppState, draft: Required<Pick<ReminderDra
     title: draft.title,
     kind: draft.kind,
     time: draft.time,
-    frequency: draft.frequency,
+    frequency: draft.frequency ?? "once",
     date: draft.date,
     weekday: draft.weekday,
     status: "active",
@@ -304,9 +304,25 @@ export function updateAppointment(state: AppState, id: string, patch: Partial<Pi
 export function setAppointmentStatus(state: AppState, id: string, status: Appointment["status"]): AppState {
   const a = state.appointments.find((x) => x.id === id);
   if (!a) return state;
-  const next = { ...state, appointments: state.appointments.map((x) => (x.id === id ? { ...x, status } : x)) };
+  const reminders = status === "cancelled" ? a.reminders.map((r) => ({ ...r, enabled: false })) : a.reminders;
+  const next = { ...state, appointments: state.appointments.map((x) => (x.id === id ? { ...x, status, reminders } : x)) };
+  if (status === "cancelled") {
+    return withEvent(next, { familyMemberId: a.familyMemberId, type: "appointment_updated", title: `${a.doctor} appointment cancelled`, description: a.location, source: "manual", refId: id });
+  }
   if (status !== "completed") return next;
   return withEvent(next, { familyMemberId: a.familyMemberId, type: "appointment_completed", title: `${a.doctor} appointment completed`, description: a.location, source: "manual", refId: id });
+}
+
+export function snoozeReminder(state: AppState, reminderId: string): AppState {
+  const r = state.reminders.find((x) => x.id === reminderId);
+  if (!r) return state;
+  return withEvent(state, { familyMemberId: r.familyMemberId, type: "reminder_snoozed", title: `${r.title} snoozed`, description: "Snoozed 10 minutes (in-app only — not a delivered notification).", source: "manual", refId: reminderId });
+}
+
+export function skipReminderOccurrence(state: AppState, reminderId: string): AppState {
+  const r = state.reminders.find((x) => x.id === reminderId);
+  if (!r) return state;
+  return withEvent(state, { familyMemberId: r.familyMemberId, type: "reminder_flagged", title: `${r.title} skipped`, description: "This occurrence was skipped. Not marked taken.", source: "manual", refId: reminderId });
 }
 
 export function toggleAppointmentReminder(state: AppState, appointmentId: string, reminderId: string): AppState {

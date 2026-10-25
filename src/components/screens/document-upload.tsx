@@ -105,27 +105,33 @@ export function DocumentUploadScreen() {
         detectedFrom: file.sample ? "sample" : guess.name ? "filename" : "manual",
         extracted,
       });
-      setProgress(0);
+      setProgress(file.blob ? 0 : 100);
       setPhase("saving");
     },
     [state.family, today, presetAppointment],
   );
 
   useEffect(() => {
-    if (phase !== "saving") return;
-    const reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-    const t = window.setInterval(() => {
-      setProgress((p) => {
-        const next = Math.min(100, p + (reduced ? 100 : 28));
-        if (next >= 100) {
-          window.clearInterval(t);
-          window.setTimeout(() => setPhase("reading"), 0);
+    if (phase !== "saving" || !picked) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        if (picked.blob) await saveFile(`pending-${picked.name}`, picked.blob);
+        if (!cancelled) {
+          setProgress(100);
+          setPhase("review");
         }
-        return next;
-      });
-    }, 70);
-    return () => window.clearInterval(t);
-  }, [phase]);
+      } catch {
+        if (!cancelled) {
+          setError(UPLOAD_ERROR);
+          setPhase("pick");
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [phase, picked]);
 
   const onReadingDone = useCallback(() => setPhase("review"), []);
 
