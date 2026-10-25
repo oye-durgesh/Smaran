@@ -79,7 +79,8 @@ Apply `supabase/migrations/0001_smaran_family.sql` only after you create a Supab
 | Medicine vs pickup intents | verified | intent tests | — |
 | Appointment complete unique / ambiguous | verified | intent tests + UI confirm | — |
 | Medicine reminders section `/medicines` | verified (local persist) | Medicines screen + store | — |
-| Claude `/api/interpret` | partial | Route + mocked schema tests; live Claude needs key | `ANTHROPIC_API_KEY` |
+| Claude `/api/ai/interpret` | partial | Zod + local parser tests; live Claude needs key | `ANTHROPIC_API_KEY` |
+| Grounded Ask `/api/ask` | partial | Local evidence + `answerQuestion` tests; no live Claude summarizer | device evidence or Supabase |
 | Supabase multi-device vault | blocked | Migration file only | Supabase URL + service role |
 | Web Push / cron delivery | blocked | `/api/cron/reminders` returns `delivered: 0` | VAPID + cron secret |
 | OCR on scans | blocked | Extract route fails honestly without key/worker | Anthropic vision or OCR worker |

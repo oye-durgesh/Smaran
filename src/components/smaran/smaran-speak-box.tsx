@@ -5,8 +5,9 @@ import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { useStore } from "@/lib/store/store";
 import { healthLabel, type HealthDraft } from "@/lib/nlu";
-import { requestInterpretation } from "@/lib/interpret/client";
-import type { InterpretSession, Interpretation } from "@/lib/interpret/schema";
+import { primaryAction, requestInterpretation } from "@/lib/interpret/client";
+import type { InterpretSession } from "@/lib/interpret/schema";
+import type { ProposedAction } from "@/lib/interpret/zod";
 import { setAppointmentStatus, updateAppointment, updateMember, upsertMeasurement } from "@/lib/store/actions";
 import { latestMeasurement, memberById, todayOf } from "@/lib/selectors";
 import { formatLong } from "@/lib/dates";
@@ -43,8 +44,8 @@ export function SmaranSpeakBox({
   const router = useRouter();
   const { state, update, commit } = useStore();
   const [pendingHealth, setPendingHealth] = useState<HealthDraft | null>(null);
-  const [pendingFact, setPendingFact] = useState<Interpretation | null>(null);
-  const [pendingAppt, setPendingAppt] = useState<Interpretation | null>(null);
+  const [pendingFact, setPendingFact] = useState<ProposedAction | null>(null);
+  const [pendingAppt, setPendingAppt] = useState<ProposedAction | null>(null);
   const [clarify, setClarify] = useState<string | null>(null);
   const [saved, setSaved] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -59,28 +60,32 @@ export function SmaranSpeakBox({
     setBusy(true);
     try {
       const result = await requestInterpretation(text, state, sessionOf(context));
-      const intent = result.intent;
+      const action = primaryAction(result);
+      const intent = action.intent;
+      if (result.actions.length > 1) {
+        setClarify(`I found ${result.actions.length} requests. Reviewing the first: ${intent.replace(/_/g, " ")}.`);
+      }
 
       if (intent === "unknown") {
-        setClarify(result.clarificationQuestion || "I need a clearer request before I create anything.");
+        setClarify(action.clarificationQuestion || "I need a clearer request before I create anything.");
         return;
       }
       if (intent === "health_measurement") {
-        if (result.clarificationQuestion || !result.memberId || !result.measurementKind || !result.measurementValue) {
-          setClarify(result.clarificationQuestion || "I need the person, type and value before saving a measurement.");
+        if (action.clarificationQuestion || !action.memberId || !action.measurementKind || !action.measurementValue) {
+          setClarify(action.clarificationQuestion || "I need the person, type and value before saving a measurement.");
           return;
         }
         setPendingHealth({
           transcript: text,
-          memberId: result.memberId,
-          kind: result.measurementKind,
-          value: result.measurementValue,
-          unit: result.unit,
+          memberId: action.memberId,
+          kind: action.measurementKind,
+          value: action.measurementValue,
+          unit: action.unit,
         });
         return;
       }
-      if (intent === "family_fact" && result.familyFact && result.memberId) {
-        setPendingFact(result);
+      if (intent === "family_fact" && action.familyAge && action.memberId) {
+        setPendingFact(action);
         return;
       }
       if (intent === "ask_question" || intent === "document_question" || context === "documents" || context === "ask") {
@@ -89,11 +94,11 @@ export function SmaranSpeakBox({
         return;
       }
       if (intent === "appointment_complete" || intent === "appointment_cancel" || intent === "appointment_reschedule") {
-        if (result.missingFields.includes("matchedRecordId") || !result.matchedAppointmentIds?.length) {
-          setClarify(result.clarificationQuestion || "Which existing appointment? I will not create a new one.");
+        if (action.missingFields.includes("matchedRecordId") || !action.matchedAppointmentIds?.length) {
+          setClarify(action.clarificationQuestion || "Which existing appointment? I will not create a new one.");
           return;
         }
-        setPendingAppt(result);
+        setPendingAppt(action);
         return;
       }
       if (onCapture) {
@@ -111,7 +116,7 @@ export function SmaranSpeakBox({
                 ? "medicine"
                 : "reminder";
       if (intent === "after_visit_note") {
-        setClarify(result.clarificationQuestion || "Saved notes need a person and confirmation. Open Memory after you confirm a visit note in review.");
+        setClarify(action.clarificationQuestion || "Saved notes need a person and confirmation. Open Memory after you confirm a visit note in review.");
         router.push(`/new?kind=reminder&text=${encodeURIComponent(text)}`);
         return;
       }
@@ -140,8 +145,8 @@ export function SmaranSpeakBox({
   };
 
   const saveFact = () => {
-    if (!pendingFact?.memberId || !pendingFact.familyFact) return;
-    update((s) => updateMember(s, pendingFact.memberId!, { age: pendingFact.familyFact!.value }));
+    if (!pendingFact?.memberId || !pendingFact.familyAge) return;
+    update((s) => updateMember(s, pendingFact.memberId!, { age: pendingFact.familyAge }));
     setSaved(`Updated ${pendingFact.memberName}'s age.`);
     setPendingFact(null);
   };
@@ -218,7 +223,7 @@ export function SmaranSpeakBox({
       {pendingFact && (
         <div className="mt-3 rounded-[20px] border border-peach bg-peach-soft/30 p-4" role="dialog">
           <p className="text-[15px] font-bold text-ink-strong">
-            Save {pendingFact.memberName}&apos;s age as {pendingFact.familyFact?.value}?
+            Save {pendingFact.memberName}&apos;s age as {pendingFact.familyAge}?
           </p>
           <p className="mt-1 text-[13px] text-ink-muted">This is a family-reported fact, not a clinical record.</p>
           <div className="mt-3 flex gap-2">

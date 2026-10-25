@@ -79,9 +79,29 @@ export function AskScreen() {
     endRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
   }, [turns]);
 
-  const ask = (text: string) => {
-    const answer = resolve(text, state);
-    setTurns((all) => [...all, { id: uid("q"), question: text, answer }]);
+  const ask = async (text: string) => {
+    try {
+      const res = await fetch("/api/ask", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          question: text,
+          timezone: "Asia/Kolkata",
+          evidence: {
+            family: state.family.map((m) => ({ id: m.id, name: m.name, relationship: m.relationship })),
+            appointments: state.appointments.map((a) => ({ id: a.id, familyMemberId: a.familyMemberId, doctor: a.doctor, date: a.date, time: a.time, status: a.status })),
+            reminders: state.reminders.map((r) => ({ id: r.id, familyMemberId: r.familyMemberId, title: r.title, kind: r.kind, time: r.time, frequency: r.frequency })),
+            measurements: state.measurements.map((m) => ({ id: m.id, familyMemberId: m.familyMemberId, kind: m.kind, value: m.value, unit: m.unit, recordedAt: m.recordedAt })),
+            documents: state.documents.map((d) => ({ id: d.id, familyMemberId: d.familyMemberId, name: d.name, type: d.type, date: d.date })),
+          },
+        }),
+      });
+      const data = (await res.json()) as Answer;
+      if (!res.ok || typeof data.text !== "string") throw new Error("ask_failed");
+      setTurns((all) => [...all, { id: uid("q"), question: text, answer: data }]);
+    } catch {
+      setTurns((all) => [...all, { id: uid("q"), question: text, answer: resolve(text, state) }]);
+    }
   };
 
   return (
